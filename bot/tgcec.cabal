@@ -18,11 +18,13 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     CEC.Bot
+                     , CEC.Types
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.12 && <4.13
                      , aeson >=1.4
                      , cassava >=0.5
+                     , containers >=0.6
                      , cryptonite >=0.26
                      , gogol >=0.5
                      , gogol-sheets >=0.5
