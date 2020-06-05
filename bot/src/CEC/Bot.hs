@@ -1,0 +1,3 @@
+-- |
+
+module CEC.Bot where
