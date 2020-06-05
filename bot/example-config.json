@@ -1,0 +1,38 @@
+{
+    "time-field": "ts",
+    "geo-field": "loc",
+    "source-field": "src",
+    "source-type": "hashed",
+    "fields": [
+        {
+            "name": "cases",
+            "desc": "Количество новых случаев подтверждённых COVID+",
+            "type": "int"
+        },
+        {
+            "name": "pneumonia",
+            "desc": "Количество новых случаев внебольничной пневмонии",
+            "type": "int"
+        }
+    ],
+    "geo-file": "example-geo.csv",
+    "welcome": "Отслеживание динамики COVID и внебольничных пневмоний",
+    "questions": [
+        {
+            "text":"Пожалуйста, присылайте ежедневно информацию об изменении ситуации в вашей больнице - это поможет отследить динамику болезни",
+            "answer": ["cases", "pneumonia"],
+            "error": "Пожалуйста, напишите через пробел два количества: новых случаев COVID+ и новых случаев пневмонии"
+        }
+    ],
+    "bot": {
+        "token": "BOT...",
+        "public-key": "...",
+        "secret-key": "...",
+        "remind": "0 8 * * *"
+    },
+    "targets": {
+        "sheets": "",
+        "ssb": "",
+        "ipfs": ""
+    }
+}

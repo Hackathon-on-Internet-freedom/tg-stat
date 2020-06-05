@@ -1,0 +1,28 @@
+{
+    "time-field": "ts",
+    "geo-field": "loc",
+    "source-field": "src",
+    "source-type": "hashed",
+    "fields": [
+        {
+            "name": "guests",
+            "desc": "Количество пришедших на митинг",
+            "type": "int"
+        }
+    ],
+    "geo-file": "example-geo.csv",
+    "welcome": "Оценим количество пришедших на митинг - всякий раз, когда приходит человек, отправьте 1. Для определения вашего города нужно отправить вашу геолокацию",
+    "register-button": "Отправить геолокацию",
+    "register-answer": "Спасибо, теперь вы можете отправлять информацию"
+    "questions": [],
+    "bot": {
+        "token": "bot...",
+        "public-key": "...",
+        "secret-key": "..."
+    },
+    "targets": {
+        "sheets": "",
+        "ssb": "",
+        "ipfs": ""
+    }
+}

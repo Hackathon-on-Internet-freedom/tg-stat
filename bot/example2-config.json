@@ -1,0 +1,58 @@
+{
+    "time-field": "ts",
+    "geo-field": "loc",
+    "source-field": "src",
+    "source-type": "encrypted",
+    "fields": [
+        {
+            "name": "birth",
+            "desc": "Дата рождения",
+            "type": "text"
+        },
+        {
+            "name": "death",
+            "desc": "Дата смерти",
+            "type": "text"
+        },
+        {
+            "name": "work",
+            "desc": "Место работы",
+            "type": "text"
+        },
+        {
+            "name": "reporter",
+            "desc": "Кто сообщил",
+            "type": "encrypt"
+        }
+    ],
+    "geo-file": "example-geo.csv",
+    "welcome": "Аналог Списка памяти врачей",
+    "questions": [
+        {
+            "text": "Дата рождения в формате DD.MM.YYYY (замените вопросами, если какая часть неизвестна)",
+            "answer": ["birth"]
+        },
+        {
+            "text": "Дата смерти в формате DD.MM.YYYY (замените вопросами, если какая часть неизвестна)",
+            "answer": ["death"]
+        },
+        {
+            "text": "Должность и место работы (в произвольной форме)",
+            "answer": ["work"]
+        },
+        {
+            "text": "Ваше имя (будет храниться в зашифрованном виде, может быть прочитано организаторами для проверки сведений)",
+            "answer": ["reporter"]
+        }
+    ],
+    "bot": {
+        "token": "BOT...",
+        "public-key": "...",
+        "secret-key": "..."
+    },
+    "targets": {
+        "sheets": "",
+        "ssb": "",
+        "ipfs": ""
+    }
+}
