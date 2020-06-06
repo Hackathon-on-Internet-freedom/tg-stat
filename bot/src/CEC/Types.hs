@@ -102,6 +102,8 @@ data BotCfg = BotCfg
   { bcToken :: Text
   , bcPublicKey :: Text
   , bcSecretKey :: Text
+  , bcEncryptKey :: Text
+  , bcIncludeChainSign :: Bool
   -- , bcRemind :: Maybe Text
   } deriving (Eq,Show,Read,Generic)
 

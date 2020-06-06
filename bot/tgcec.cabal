@@ -20,6 +20,7 @@ library
   exposed-modules:     CEC.Bot
                      , CEC.Types
                      , CEC.Geo
+                     , CEC.Keys
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.12 && <4.13
@@ -30,6 +31,7 @@ library
                      , cryptonite >=0.26
                      , gogol >=0.5
                      , gogol-sheets >=0.5
+                     , memory >=0.15
                      , telegram-bot-simple >=0.3
                      , text >=1.2
                        -- gogol =0.5 requires servant <0.17, but doesn't specifies upper bound
