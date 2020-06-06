@@ -23,6 +23,7 @@ import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Read
+import Data.Time.Clock.POSIX
 import GHC.Float (float2Double)
 import System.Exit
 import Telegram.Bot.API
@@ -97,8 +98,7 @@ addRequiredFields cfg user loc olds = do
   let tn = cfgTimeField cfg
       un = cfgSourceField cfg
       gn = cfgGeoField cfg
-      ts = 0
-  -- ts <- getCurrentTime
+  ts <- round <$> getPOSIXTime
   pure $
     M.insert tn (ValTime ts) $
     M.insert un (ValUser user) $
@@ -127,6 +127,7 @@ handleAction cfg geoDb mq act st = case act of
     st' = RegisteredGeo src loc
     in st' <# do
     reply (toReplyMessage $ regAnswer loc)
+    reply (toReplyMessage q0)
     pure NoOp
   Ans t -> case addAnswer cfg (getCurrent st) (getAnswers st) t of
     Left err -> st <# do
@@ -165,8 +166,8 @@ handleAction cfg geoDb mq act st = case act of
     regAnswer loc = T.concat
       [ fromMaybe "Thank you!" (cfgRegisterAnswer cfg), "\n"
       , fromMaybe "Location: " (cfgLocationText cfg), locCity loc
-      , maybe "" (("\n" <>) . qdText) $ listToMaybe $ cfgQuestions cfg
       ]
+    q0 = maybe "" (("\n" <>) . qdText) $ listToMaybe $ cfgQuestions cfg
 
 collectBot :: Config -> GeoDb -> TBQueue (Map Text FieldVal) -> BotApp State Action
 collectBot cfg geoDb mq = BotApp
