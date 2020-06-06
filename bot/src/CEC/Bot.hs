@@ -7,6 +7,7 @@
 module CEC.Bot where
 
 import CEC.Types
+import CEC.Geo
 
 import Control.Applicative
 import Control.Monad
@@ -28,7 +29,7 @@ import Telegram.Bot.Simple.UpdateParser
 data Action
   = NoOp
   | Start
-  | Register Location
+  | Register UserId Location
   | Ans Text
   -- | Trust Text
   deriving (Show)
@@ -39,12 +40,15 @@ initialModel = NotStarted
 location :: UpdateParser Location
 location = mkParser $ updateMessage >=> messageLocation
 
+user :: UpdateParser UserId
+user = mkParser $ fmap (fmap userId) $ updateMessage >=> messageFrom
+
 updateToAction :: Config -> State -> Update -> Maybe Action
 updateToAction cfg NotStarted = parseUpdate $
       Start <$ command "start"
-  <|> Register <$> location
+  <|> Register <$> user <*> location
 updateToAction cfg _st = parseUpdate $
-      Register <$> location
+      Register <$> user <*> location
   <|> Ans <$> text
 
 (!?) :: [a] -> Int -> Maybe a
@@ -85,25 +89,34 @@ addAnswer cfg idx olds text = let
           then (olds `M.union`) . uncurry M.singleton <$> (parseFieldVal cfg) (head fields, text)
           else Left "Incorrect number of fields"
 
+addRequiredFields :: Config -> Text -> Loc -> Map Text FieldVal -> IO (Map Text FieldVal)
+addRequiredFields cfg user loc olds = pure $
+                                      M.insert "user" (ValUser user) $
+                                      M.insert "loc" (ValLoc loc) $
+                                      olds
+
 saveRow :: Config -> Map Text FieldVal -> IO Text
-saveRow cfg ans = pure $ "saved!" <> T.concat (map (\(k,v) -> k <> ": " <> pp v) $ M.assocs ans)
+saveRow cfg res = pure $ "saved! " <> T.intercalate ", " (map (\(k,v) -> k <> ": " <> pp v) $ M.assocs res)
   where pp (ValInt x) = T.pack $ show x
         pp (ValFloat x) = T.pack $ show x
         pp (ValText t) = t
         pp (ValEncrypt t) = t
+        pp (ValLoc loc) = T.intercalate "/" $ map ($ loc) [locCity, fromMaybe "" . locMunicip, fromMaybe "" . locRegion, locSubject]
+        pp (ValUser u) = "ENC(" <> u <> ")"
 
-handleAction :: Config -> Action -> State -> Eff Action State
-handleAction cfg act st = case act of
+handleAction :: Config -> GeoDb -> Action -> State -> Eff Action State
+handleAction cfg geoDb act st = case act of
   NoOp -> pure st
   Start -> st <# do
     reply (toReplyMessage $ cfgWelcome cfg)
       { replyMessageReplyMarkup = Just (SomeReplyKeyboardMarkup regKeyboard) }
     pure NoOp
-  Register loc -> let
-    st' = RegisteredGeo (float2Double $ locationLatitude loc) (float2Double $ locationLongitude loc)
+  Register (UserId userId) geo -> let
+    loc = findNearest geoDb (float2Double $ locationLatitude geo) (float2Double $ locationLongitude geo)
+    src = T.pack $ show userId
+    st' = RegisteredGeo src loc
     in st' <# do
-    reply (toReplyMessage regAnswer)
-    liftIO $ putStrLn $ show st'
+    reply (toReplyMessage $ regAnswer loc)
     pure NoOp
   Ans t -> case addAnswer cfg (getCurrent st) (getAnswers st) t of
     Left err -> st <# do
@@ -114,16 +127,17 @@ handleAction cfg act st = case act of
       idx = getCurrent st + 1
       nextQuestion = qdText <$> cfgQuestions cfg !? idx
       st'' = case nextQuestion of
-        Nothing -> RegisteredGeo (stLat st) (stLon st)
+        Nothing -> RegisteredGeo (stSrc st) (stLoc st)
         Just nq -> Answered
-          { stLat = stLat st
-          , stLon = stLon st
+          { stSrc = stSrc st
+          , stLoc = stLoc st
           , stCurrent = idx
           , stAnswers = ans
           }
       in st'' <# case nextQuestion of
                    Nothing -> do
-                     msg <- liftIO $ saveRow cfg ans
+                     res <- liftIO $ addRequiredFields cfg (stSrc st) (stLoc st) ans
+                     msg <- liftIO $ saveRow cfg res
                      reply (toReplyMessage msg)
                      pure NoOp
                    Just nq -> do
@@ -138,23 +152,25 @@ handleAction cfg act st = case act of
       , replyKeyboardMarkupSelective = Nothing
       }
     regButtonName = fromMaybe "Register location" $ cfgRegisterButton cfg
-    regAnswer = T.concat
-      [ fromMaybe "Thank you!" (cfgRegisterAnswer cfg)
+    regAnswer loc = T.concat
+      [ fromMaybe "Thank you!" (cfgRegisterAnswer cfg), "\n"
+      , fromMaybe "Location: " (cfgLocationText cfg), locCity loc
       , maybe "" (("\n" <>) . qdText) $ listToMaybe $ cfgQuestions cfg
       ]
 
-collectBot :: Config -> BotApp State Action
-collectBot cfg = BotApp
+collectBot :: Config -> GeoDb -> BotApp State Action
+collectBot cfg geoDb = BotApp
   { botInitialModel = initialModel
   , botAction = flip $ updateToAction cfg
-  , botHandler = handleAction cfg
+  , botHandler = handleAction cfg geoDb
   , botJobs = []
   }
 
 run :: Config -> IO ()
 run cfg@Config{ cfgBot = BotCfg{ bcToken = token } } = do
+  geo <- loadGeoData $ cfgGeoFile cfg
   env <- defaultTelegramClientEnv $ Token token
-  startBot_ (conversationBot updateChatId $ collectBot cfg) env
+  startBot_ (conversationBot updateChatId $ collectBot cfg geo) env
 
 readConfigOrDie :: FilePath -> IO Config
 readConfigOrDie cfgFile = do

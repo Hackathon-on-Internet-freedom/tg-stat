@@ -1,6 +1,7 @@
 -- | Types of all entities
 
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE StrictData #-}
 
 module CEC.Types where
@@ -9,6 +10,20 @@ import Data.Aeson
 import Data.Map.Strict (Map,empty)
 import Data.Text (Text)
 import GHC.Generics
+import Telegram.Bot.API.Types (UserId(..))
+
+data Loc = Loc
+  { locId :: Text
+  , locCity :: Text
+  , locMunicip :: Maybe Text
+  , locRegion :: Maybe Text
+  , locSubject :: Text
+  } deriving (Eq,Show,Read,Generic)
+
+instance FromJSON Loc where
+  parseJSON = genericParseJSON $ jsonOpts 2 0
+instance ToJSON Loc where
+  toEncoding = genericToEncoding $ jsonOpts 2 0
 
 data OpType
   = OpSum
@@ -45,11 +60,15 @@ instance FromJSON FieldType where
 instance ToJSON FieldType where
   toEncoding = genericToEncoding $ jsonOpts 5 0
 
+deriving instance Read UserId
+
 data FieldVal
   = ValInt Int
   | ValFloat Double
   | ValText Text
   | ValEncrypt Text
+  | ValLoc Loc
+  | ValUser Text
   deriving (Eq,Show,Read,Generic)
 
 instance FromJSON FieldVal where
@@ -112,6 +131,7 @@ data Config = Config
   , cfgWelcome :: Text
   , cfgRegisterButton :: Maybe Text
   , cfgRegisterAnswer :: Maybe Text
+  , cfgLocationText :: Maybe Text
   , cfgQuestions :: [QuestionDef]
   , cfgBot :: BotCfg
   , cfgTargets :: TargetCfg
@@ -125,12 +145,12 @@ instance ToJSON Config where
 data State
   = NotStarted
   | RegisteredGeo
-    { stLat :: Double
-    , stLon :: Double
+    { stSrc :: Text
+    , stLoc :: Loc
     }
   | Answered
-    { stLat :: Double
-    , stLon :: Double
+    { stSrc :: Text
+    , stLoc :: Loc
     , stCurrent :: Int
     , stAnswers :: Map Text FieldVal
     }
