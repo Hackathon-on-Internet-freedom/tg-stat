@@ -47,6 +47,6 @@ mlr --csv sort -f okato then head -n 1 -g okato cities.csv > uniq-cities.csv
 
 ## Группировка по районам и субъектам и готовые данные
 
-Для группировки используем то, что ОКАТО иерархичен и [этот скрипт](attic/geo.R).
+Для группировки используем то, что ОКАТО иерархичен и [этот скрипт](/attic/geo.R).
 
-Готовые данные лежат в [example-geo.csv](example-geo.csv).
+Готовые данные лежат в [example-geo.csv](/example-geo.csv).
