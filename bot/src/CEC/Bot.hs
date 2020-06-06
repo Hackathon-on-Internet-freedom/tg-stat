@@ -8,8 +8,11 @@ module CEC.Bot where
 
 import CEC.Types
 import CEC.Geo
+import CEC.Sheets
 
 import Control.Applicative
+import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson
@@ -90,22 +93,29 @@ addAnswer cfg idx olds text = let
           else Left "Incorrect number of fields"
 
 addRequiredFields :: Config -> Text -> Loc -> Map Text FieldVal -> IO (Map Text FieldVal)
-addRequiredFields cfg user loc olds = pure $
-                                      M.insert "user" (ValUser user) $
-                                      M.insert "loc" (ValLoc loc) $
-                                      olds
+addRequiredFields cfg user loc olds = do
+  let tn = cfgTimeField cfg
+      un = cfgSourceField cfg
+      gn = cfgGeoField cfg
+      ts = 0
+  -- ts <- getCurrentTime
+  pure $
+    M.insert tn (ValTime ts) $
+    M.insert un (ValUser user) $
+    M.insert gn (ValLoc loc) $
+    olds
 
-saveRow :: Config -> Map Text FieldVal -> IO Text
-saveRow cfg res = pure $ "saved! " <> T.intercalate ", " (map (\(k,v) -> k <> ": " <> pp v) $ M.assocs res)
-  where pp (ValInt x) = T.pack $ show x
-        pp (ValFloat x) = T.pack $ show x
-        pp (ValText t) = t
-        pp (ValEncrypt t) = t
-        pp (ValLoc loc) = T.intercalate "/" $ map ($ loc) [locCity, fromMaybe "" . locMunicip, fromMaybe "" . locRegion, locSubject]
-        pp (ValUser u) = "ENC(" <> u <> ")"
+-- saveRow :: Config -> Map Text FieldVal -> IO Text
+-- saveRow cfg res = pure $ "saved! " <> T.intercalate ", " (map (\(k,v) -> k <> ": " <> pp v) $ M.assocs res)
+--   where pp (ValInt x) = T.pack $ show x
+--         pp (ValFloat x) = T.pack $ show x
+--         pp (ValText t) = t
+--         pp (ValEncrypt t) = t
+--         pp (ValLoc loc) = T.intercalate "/" $ map ($ loc) [locCity, fromMaybe "" . locMunicip, fromMaybe "" . locRegion, locSubject]
+--         pp (ValUser u) = "ENC(" <> u <> ")"
 
-handleAction :: Config -> GeoDb -> Action -> State -> Eff Action State
-handleAction cfg geoDb act st = case act of
+handleAction :: Config -> GeoDb -> TBQueue (Map Text FieldVal) -> Action -> State -> Eff Action State
+handleAction cfg geoDb mq act st = case act of
   NoOp -> pure st
   Start -> st <# do
     reply (toReplyMessage $ cfgWelcome cfg)
@@ -137,8 +147,8 @@ handleAction cfg geoDb act st = case act of
       in st'' <# case nextQuestion of
                    Nothing -> do
                      res <- liftIO $ addRequiredFields cfg (stSrc st) (stLoc st) ans
-                     msg <- liftIO $ saveRow cfg res
-                     reply (toReplyMessage msg)
+                     liftIO $ atomically $ writeTBQueue mq res
+                     reply (toReplyMessage "sent")
                      pure NoOp
                    Just nq -> do
                      reply (toReplyMessage nq)
@@ -158,19 +168,21 @@ handleAction cfg geoDb act st = case act of
       , maybe "" (("\n" <>) . qdText) $ listToMaybe $ cfgQuestions cfg
       ]
 
-collectBot :: Config -> GeoDb -> BotApp State Action
-collectBot cfg geoDb = BotApp
+collectBot :: Config -> GeoDb -> TBQueue (Map Text FieldVal) -> BotApp State Action
+collectBot cfg geoDb mq = BotApp
   { botInitialModel = initialModel
   , botAction = flip $ updateToAction cfg
-  , botHandler = handleAction cfg geoDb
+  , botHandler = handleAction cfg geoDb mq
   , botJobs = []
   }
 
 run :: Config -> IO ()
 run cfg@Config{ cfgBot = BotCfg{ bcToken = token } } = do
   geo <- loadGeoData $ cfgGeoFile cfg
+  mq <- newTBQueueIO 1000
+  forkIO $ sheetWorker cfg mq
   env <- defaultTelegramClientEnv $ Token token
-  startBot_ (conversationBot updateChatId $ collectBot cfg geo) env
+  startBot_ (conversationBot updateChatId $ collectBot cfg geo mq) env
 
 readConfigOrDie :: FilePath -> IO Config
 readConfigOrDie cfgFile = do

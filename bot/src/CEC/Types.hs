@@ -67,6 +67,7 @@ data FieldVal
   | ValFloat Double
   | ValText Text
   | ValEncrypt Text
+  | ValTime Int
   | ValLoc Loc
   | ValUser Text
   deriving (Eq,Show,Read,Generic)
@@ -143,6 +144,9 @@ instance FromJSON Config where
   parseJSON = genericParseJSON $ jsonOpts 6 3
 instance ToJSON Config where
   toEncoding = genericToEncoding $ jsonOpts 6 3
+
+getFieldNames :: Config -> [Text]
+getFieldNames cfg = cfgTimeField cfg : cfgGeoField cfg : cfgSourceField cfg : map fdName (cfgFields cfg)
 
 data State
   = NotStarted
