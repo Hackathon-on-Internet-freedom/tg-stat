@@ -32,4 +32,4 @@ md <- df4 %>%
   select(okato, name.4,lat.4,lon.4, name.3,lat.3,lon.3, name.2,lat.2,lon.2, name.1,lat.1,lon.1) %>%
   arrange(okato)
 
-write_csv(md, "/tmp/levels.csv")
+write_csv(md, "/tmp/levels.csv", na = "")
