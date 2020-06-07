@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module CEC.Types where
 
@@ -134,10 +135,12 @@ data Config = Config
   , cfgWelcome :: Text
   , cfgRegisterButton :: Maybe Text
   , cfgRegisterAnswer :: Maybe Text
+  , cfgTrustAnswer :: Maybe Text
   , cfgLocationText :: Maybe Text
   , cfgQuestions :: [QuestionDef]
   , cfgBot :: BotCfg
   , cfgTargets :: TargetCfg
+  , cfgResult :: Text
   } deriving (Eq,Show,Read,Generic)
 
 instance FromJSON Config where
@@ -169,6 +172,11 @@ getCurrent _ = 0
 getAnswers :: State -> Map Text FieldVal
 getAnswers Answered{ stAnswers=m } = m
 getAnswers _ = empty
+
+data MsgItem
+  = MsgInfo (Map Text FieldVal)
+  | MsgTrust (Int, Text, Text)
+  deriving (Eq,Show,Read,Generic)
 
 jsonOpts :: Int -> Int -> Options
 jsonOpts m k = defaultOptions

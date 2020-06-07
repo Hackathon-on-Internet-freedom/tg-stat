@@ -20,24 +20,31 @@ import Network.Google.Sheets
 import Network.Google
 import System.IO (stdout)
 
-sheetWorker :: Config -> TBQueue (Map Text FieldVal) -> IO ()
+sheetWorker :: Config -> TBQueue MsgItem -> IO ()
 sheetWorker cfg mq = forever $ do
-  ans <- atomically $ readTBQueue mq
-  appendRow cfg ans
-
-appendRow :: Config -> Map Text FieldVal -> IO Text
-appendRow cfg ans = do
   let sheetId = tcSheets $ cfgTargets cfg
-      fields = getFieldNames cfg
+  msg <- atomically $ readTBQueue mq
+  case msg of
+    MsgInfo ans -> appendRow cfg sheetId ans
+    MsgTrust (ts,src,tgt) -> appendGS sheetId "trust" SrcOpen
+      [ ValTime ts
+      , ValUser src
+      , ValUser tgt
+      ]
+
+appendRow :: Config -> Text -> Map Text FieldVal -> IO Text
+appendRow cfg sheetId ans = do
+  let fields = getFieldNames cfg
       orderedAns = map (ans M.!) fields
       srcType = cfgSourceType cfg
-  appendGS sheetId srcType orderedAns
+  appendGS sheetId "raw" srcType orderedAns
 
-appendGS :: Text -> SourceType -> [FieldVal] -> IO Text
-appendGS sheetId srcType vals = do
-  let range = "raw!A:" <> (T.pack $ pure $ chr $ ord 'A' + length vals - 1)
+appendGS :: Text -> Text -> SourceType -> [FieldVal] -> IO Text
+appendGS sheetId name srcType vals = do
+  let raws = concatMap (toJV srcType) vals
+      range = name <> "!A:" <> (T.pack $ pure $ chr $ ord 'A' + length raws - 1)
       values = valueRange
-        & vrValues .~ [map (toJV srcType) vals]
+        & vrValues .~ [raws]
         & vrRange .~ Just range
         & vrMajorDimension .~ Just VRMDRows
       req = spreadsheetsValuesAppend sheetId values range
@@ -49,21 +56,19 @@ appendGS sheetId srcType vals = do
   resp <- runResourceT . runGoogle env $ send req
   pure $ T.pack $ show resp
 
-toJV :: SourceType -> FieldVal -> Value
-toJV _ (ValInt n) = toJSON n
-toJV _ (ValFloat d) = toJSON d
-toJV _ (ValText t) = toJSON t
-toJV _ (ValEncrypt t) = toJSON $ "ENC(" <> t <> ")"
-toJV _ (ValTime ts) = toJSON ts
-toJV _ (ValLoc loc) = toJSON $
-  T.intercalate "/" $
-  map ($ loc) [ locCity
-              , fromMaybe "" . locMunicip
-              , fromMaybe "" . locRegion
-              , locSubject
-              ]
-toJV srcType (ValUser u) = toJSON $ f <> "(" <> u <> ")"
-  where f = case srcType of
-          SrcOpen -> ""
-          SrcHashed -> "HASH"
-          SrcEncrypted -> "ENCRYPT"
+toJV :: SourceType -> FieldVal -> [Value]
+toJV _ (ValInt n) = pure $ toJSON n
+toJV _ (ValFloat d) = pure $ toJSON d
+toJV _ (ValText t) = pure $ toJSON t
+toJV _ (ValEncrypt t) = ["nonce", toJSON $ "ENC(" <> t <> ")"]
+toJV _ (ValTime ts) = pure $ toJSON ts
+toJV _ (ValLoc loc) = map (toJSON . ($ loc))
+  [ locCity
+  , fromMaybe "" . locMunicip
+  , fromMaybe "" . locRegion
+  , locSubject
+  ]
+toJV srcType (ValUser u) = case srcType of
+  SrcOpen -> pure $ toJSON u
+  SrcHashed -> pure $ toJSON $ "HASH" <> "(" <> u <> ")"
+  SrcEncrypted -> [ toJSON ("nonce" :: Text), toJSON $ "ENCRYPT(" <> u <> ")" ]

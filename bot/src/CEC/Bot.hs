@@ -1,4 +1,4 @@
--- |
+-- | Main telegram bot module
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StrictData #-}
@@ -33,9 +33,10 @@ import Telegram.Bot.Simple.UpdateParser
 data Action
   = NoOp
   | Start
+  | Help
   | Register UserId Location
   | Ans Text
-  -- | Trust Text
+  | Trust Text Text
   deriving (Show)
 
 initialModel :: State
@@ -47,13 +48,16 @@ location = mkParser $ updateMessage >=> messageLocation
 user :: UpdateParser UserId
 user = mkParser $ fmap (fmap userId) $ updateMessage >=> messageFrom
 
-updateToAction :: Config -> State -> Update -> Maybe Action
-updateToAction cfg NotStarted = parseUpdate $
+updateToAction :: State -> Update -> Maybe Action
+updateToAction NotStarted = parseUpdate $
       Start <$ command "start"
+  <|> Help <$ command "help"
   <|> Register <$> user <*> location
-updateToAction cfg _st = parseUpdate $
+updateToAction _st = parseUpdate $
       Register <$> user <*> location
   <|> Ans <$> text
+  <|> Help <$ command "help"
+  <|> (\_ s t -> Trust s t) <$> command "trust" <*> fmap (T.pack . show) user <*> text
 
 (!?) :: [a] -> Int -> Maybe a
 (!?) [] _ = Nothing
@@ -73,61 +77,60 @@ mkErrorMsg allFields err mqd = case qdError =<< mqd of
 runParser :: Reader a -> Text -> Either String a
 runParser p t = fst <$> p t
 
-parseFieldVal :: Config -> (FieldDef, Text) -> Either String (Text, FieldVal)
-parseFieldVal cfg (field, text) = (fdName field,) <$> case fdType field of
-  FieldInt -> ValInt <$> runParser decimal text
-  FieldFloat -> ValFloat <$> runParser double text
-  FieldText -> Right $ ValText text
-  FieldEncrypt -> Right $ ValEncrypt $ "ENCRYPT(" <> text <> ")"
+parseFieldVal :: (FieldDef, Text) -> Either String (Text, FieldVal)
+parseFieldVal (field, txt) = (fdName field,) <$> case fdType field of
+  FieldInt -> ValInt <$> runParser decimal txt
+  FieldFloat -> ValFloat <$> runParser double txt
+  FieldText -> Right $ ValText txt
+  FieldEncrypt -> Right $ ValEncrypt txt
 
 addAnswer :: Config -> Int -> Map Text FieldVal -> Text -> Either String (Map Text FieldVal)
-addAnswer cfg idx olds text = let
+addAnswer cfg idx olds txt = let
   mquestion = cfgQuestions cfg !? idx
   fields = case mquestion of
     Nothing -> cfgFields cfg
     Just question -> map (\name -> fromJust . find ((==name) . fdName) $ cfgFields cfg) $ qdAnswer question
-  ws = T.words text
+  ws = T.words txt
   in if length ws == length fields
-     then (olds `M.union`) . M.fromList <$> mapM (parseFieldVal cfg) (zip fields ws)
+     then (olds `M.union`) . M.fromList <$> mapM parseFieldVal (zip fields ws)
      else if length fields == 1 && fdType (head fields) `elem` [FieldText, FieldEncrypt]
-          then (olds `M.union`) . uncurry M.singleton <$> (parseFieldVal cfg) (head fields, text)
+          then (olds `M.union`) . uncurry M.singleton <$> parseFieldVal (head fields, txt)
           else Left "Incorrect number of fields"
 
 addRequiredFields :: Config -> Text -> Loc -> Map Text FieldVal -> IO (Map Text FieldVal)
-addRequiredFields cfg user loc olds = do
+addRequiredFields cfg usr loc olds = do
   let tn = cfgTimeField cfg
       un = cfgSourceField cfg
       gn = cfgGeoField cfg
   ts <- round <$> getPOSIXTime
   pure $
     M.insert tn (ValTime ts) $
-    M.insert un (ValUser user) $
+    M.insert un (ValUser usr) $
     M.insert gn (ValLoc loc) $
     olds
 
--- saveRow :: Config -> Map Text FieldVal -> IO Text
--- saveRow cfg res = pure $ "saved! " <> T.intercalate ", " (map (\(k,v) -> k <> ": " <> pp v) $ M.assocs res)
---   where pp (ValInt x) = T.pack $ show x
---         pp (ValFloat x) = T.pack $ show x
---         pp (ValText t) = t
---         pp (ValEncrypt t) = t
---         pp (ValLoc loc) = T.intercalate "/" $ map ($ loc) [locCity, fromMaybe "" . locMunicip, fromMaybe "" . locRegion, locSubject]
---         pp (ValUser u) = "ENC(" <> u <> ")"
-
-handleAction :: Config -> GeoDb -> TBQueue (Map Text FieldVal) -> Action -> State -> Eff Action State
+handleAction :: Config -> GeoDb -> TBQueue MsgItem -> Action -> State -> Eff Action State
 handleAction cfg geoDb mq act st = case act of
   NoOp -> pure st
+  Help -> st <# do
+    reply $ toReplyMessage $ botUsage cfg
+    pure NoOp
   Start -> st <# do
     reply (toReplyMessage $ cfgWelcome cfg)
       { replyMessageReplyMarkup = Just (SomeReplyKeyboardMarkup regKeyboard) }
     pure NoOp
-  Register (UserId userId) geo -> let
+  Register (UserId uid) geo -> let
     loc = findNearest geoDb (float2Double $ locationLatitude geo) (float2Double $ locationLongitude geo)
-    src = T.pack $ show userId
+    src = T.pack $ show uid
     st' = RegisteredGeo src loc
     in st' <# do
     reply (toReplyMessage $ regAnswer loc)
     reply (toReplyMessage q0)
+    pure NoOp
+  Trust src tgt -> st <# do
+    reply $ toReplyMessage $ trustAnswer tgt
+    ts <- round <$> liftIO getPOSIXTime
+    liftIO $ atomically $ writeTBQueue mq $ MsgTrust (ts, src, tgt)
     pure NoOp
   Ans t -> case addAnswer cfg (getCurrent st) (getAnswers st) t of
     Left err -> st <# do
@@ -139,7 +142,7 @@ handleAction cfg geoDb mq act st = case act of
       nextQuestion = qdText <$> cfgQuestions cfg !? idx
       st'' = case nextQuestion of
         Nothing -> RegisteredGeo (stSrc st) (stLoc st)
-        Just nq -> Answered
+        Just _ -> Answered
           { stSrc = stSrc st
           , stLoc = stLoc st
           , stCurrent = idx
@@ -148,7 +151,7 @@ handleAction cfg geoDb mq act st = case act of
       in st'' <# case nextQuestion of
                    Nothing -> do
                      res <- liftIO $ addRequiredFields cfg (stSrc st) (stLoc st) ans
-                     liftIO $ atomically $ writeTBQueue mq res
+                     liftIO $ atomically $ writeTBQueue mq $ MsgInfo res
                      reply (toReplyMessage "sent")
                      pure NoOp
                    Just nq -> do
@@ -168,11 +171,44 @@ handleAction cfg geoDb mq act st = case act of
       , fromMaybe "Location: " (cfgLocationText cfg), locCity loc
       ]
     q0 = maybe "" (("\n" <>) . qdText) $ listToMaybe $ cfgQuestions cfg
+    trustAnswer tgt = fromMaybe "Started trusting user-id " (cfgTrustAnswer cfg) <> tgt
 
-collectBot :: Config -> GeoDb -> TBQueue (Map Text FieldVal) -> BotApp State Action
+botUsage :: Config -> Text
+botUsage cfg = T.concat $
+  [ "This bot collects statistics and writes it into Google Sheets\n\n"
+  , "Author provided the following description: \n"
+  , cfgWelcome cfg, "\n"
+  , "\n"
+  , "Your telegram user "
+  , case cfgSourceType cfg of
+      SrcOpen -> "is saved in plain text"
+      SrcHashed -> "is hashed, and no one can restore it (but one can distinguish different users)"
+      SrcEncrypted -> "is encrypted, but author can read it and disclose it"
+  , "\n"
+  , "Bot also saves time and your approximate location\n"
+  , "Results are published here: ", cfgResult cfg, "\n"
+  , "Questions asked and statistics collected:\n"
+  ] ++ map mkQuestionDesc (zip [1..] $ cfgQuestions cfg)
+  where
+    mkQuestionDesc :: (Int, QuestionDef) -> Text
+    mkQuestionDesc (i, qd) = let
+      fields = M.fromList $ map (\f -> (fdName f, f)) $ cfgFields cfg
+      in T.concat $
+         [ T.pack $ show i, ". ", qdText qd, "\n" ] ++
+         map (mkFieldDesc fields) (qdAnswer qd)
+    mkFieldDesc :: Map Text FieldDef -> Text -> Text
+    mkFieldDesc fields name = let
+      field = fields M.! name
+      in T.concat [ " + ", name, " - ", fdDesc field, " - ", mkTypeDesc $ fdType field ]
+    mkTypeDesc FieldInt = "integer"
+    mkTypeDesc FieldFloat = "floating point number"
+    mkTypeDesc FieldText = "text"
+    mkTypeDesc FieldEncrypt = "encrypted text (author can read it and disclose it)"
+
+collectBot :: Config -> GeoDb -> TBQueue MsgItem -> BotApp State Action
 collectBot cfg geoDb mq = BotApp
   { botInitialModel = initialModel
-  , botAction = flip $ updateToAction cfg
+  , botAction = flip updateToAction
   , botHandler = handleAction cfg geoDb mq
   , botJobs = []
   }
@@ -181,7 +217,7 @@ run :: Config -> IO ()
 run cfg@Config{ cfgBot = BotCfg{ bcToken = token } } = do
   geo <- loadGeoData $ cfgGeoFile cfg
   mq <- newTBQueueIO 1000
-  forkIO $ sheetWorker cfg mq
+  _ <- forkIO $ sheetWorker cfg mq
   env <- defaultTelegramClientEnv $ Token token
   startBot_ (conversationBot updateChatId $ collectBot cfg geo mq) env
 
