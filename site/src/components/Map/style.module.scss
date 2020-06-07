@@ -1,0 +1,38 @@
+.root {
+  flex: 2 1 auto;
+  max-width: 1000px;
+  padding: 20px 40px;
+
+  svg {
+    stroke: #fff;
+
+    path {
+      fill: #a82b2b;
+      cursor: pointer;
+      outline: none;
+
+      &:hover {
+        fill: rgba(168, 43, 43, 0.83);
+      }
+
+      &:focus {
+        fill: rgba(168, 43, 43, 0.6);
+      }
+
+      // When a layer is 'checked' (via checkedLayers prop).
+      &[aria-checked='true'] {
+        fill: rgba(56,43,168,1);
+      }
+
+      // When a layer is 'selected' (via currentLayers prop).
+      &[aria-current='true'] {
+        fill: rgba(56,43,168,0.83);
+      }
+
+      // You can also highlight a specific layer via it's id
+      &[id="ru-spe"] {
+        fill: rgba(56,43,168,0.6);
+      }
+    }
+  }
+}
