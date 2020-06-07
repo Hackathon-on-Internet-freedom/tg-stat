@@ -1,8 +1,10 @@
 -- | Main telegram bot module
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module CEC.Bot where
 
@@ -30,6 +32,8 @@ import Telegram.Bot.API
 import Telegram.Bot.Simple
 import Telegram.Bot.Simple.UpdateParser
 
+deriving instance Read Location
+
 data Action
   = NoOp
   | Start
@@ -37,7 +41,7 @@ data Action
   | Register UserId Location
   | Ans Text
   | Trust Text Text
-  deriving (Show)
+  deriving (Read,Show)
 
 initialModel :: State
 initialModel = NotStarted
@@ -48,16 +52,32 @@ location = mkParser $ updateMessage >=> messageLocation
 user :: UpdateParser UserId
 user = mkParser $ fmap (fmap userId) $ updateMessage >=> messageFrom
 
+cmd :: Text -> UpdateParser Text
+cmd name = do
+  t <- text
+  case T.words t of
+    (w : ws) | w == "/" <> name -> pure (T.unwords ws)
+    _ -> empty
+
+plaintext :: UpdateParser Text
+plaintext = do
+  t <- text
+  if "/" `T.isPrefixOf` t
+    then empty
+    else pure t
+
 updateToAction :: State -> Update -> Maybe Action
 updateToAction NotStarted = parseUpdate $
-      Start <$ command "start"
-  <|> Help <$ command "help"
-  <|> Register <$> user <*> location
+      Register <$> user <*> location
+  <|> Start <$ cmd "start"
+  <|> Help <$ cmd "help"
+  <|> callbackQueryDataRead
 updateToAction _st = parseUpdate $
       Register <$> user <*> location
-  <|> Ans <$> text
-  <|> Help <$ command "help"
-  <|> (\_ s t -> Trust s t) <$> command "trust" <*> fmap (T.pack . show) user <*> text
+  <|> Help <$ cmd "help"
+  <|> flip Trust <$> cmd "trust" <*> fmap (T.pack . show . (\(UserId u) -> u)) user
+  <|> Ans <$> plaintext
+  <|> callbackQueryDataRead
 
 (!?) :: [a] -> Int -> Maybe a
 (!?) [] _ = Nothing
@@ -176,17 +196,17 @@ handleAction cfg geoDb mq act st = case act of
 botUsage :: Config -> Text
 botUsage cfg = T.concat $
   [ "This bot collects statistics and writes it into Google Sheets\n\n"
-  , "Author provided the following description: \n"
-  , cfgWelcome cfg, "\n"
-  , "\n"
   , "Your telegram user "
   , case cfgSourceType cfg of
       SrcOpen -> "is saved in plain text"
       SrcHashed -> "is hashed, and no one can restore it (but one can distinguish different users)"
       SrcEncrypted -> "is encrypted, but author can read it and disclose it"
   , "\n"
-  , "Bot also saves time and your approximate location\n"
+  , "Bot also saves time and your approximate location\n\n"
   , "Results are published here: ", cfgResult cfg, "\n"
+  , "Author provided the following description: \n"
+  , cfgWelcome cfg, "\n"
+  , "\n"
   , "Questions asked and statistics collected:\n"
   ] ++ map mkQuestionDesc (zip [1..] $ cfgQuestions cfg)
   where
@@ -199,7 +219,7 @@ botUsage cfg = T.concat $
     mkFieldDesc :: Map Text FieldDef -> Text -> Text
     mkFieldDesc fields name = let
       field = fields M.! name
-      in T.concat [ " + ", name, " - ", fdDesc field, " - ", mkTypeDesc $ fdType field ]
+      in T.concat [ " + ", name, " - ", fdDesc field, " - ", mkTypeDesc $ fdType field, "\n" ]
     mkTypeDesc FieldInt = "integer"
     mkTypeDesc FieldFloat = "floating point number"
     mkTypeDesc FieldText = "text"
