@@ -41,6 +41,7 @@ data Action
   | Register UserId Location
   | Ans Text
   | Trust Text Text
+  | Me UserId
   deriving (Read,Show)
 
 initialModel :: State
@@ -71,11 +72,13 @@ updateToAction NotStarted = parseUpdate $
       Register <$> user <*> location
   <|> Start <$ cmd "start"
   <|> Help <$ cmd "help"
+  <|> const Me <$> cmd "me" <*> user
   <|> callbackQueryDataRead
 updateToAction _st = parseUpdate $
       Register <$> user <*> location
   <|> Help <$ cmd "help"
   <|> flip Trust <$> cmd "trust" <*> fmap (T.pack . show . (\(UserId u) -> u)) user
+  <|> const Me <$> cmd "me" <*> user
   <|> Ans <$> plaintext
   <|> callbackQueryDataRead
 
@@ -152,6 +155,9 @@ handleAction cfg geoDb mq act st = case act of
     ts <- round <$> liftIO getPOSIXTime
     liftIO $ atomically $ writeTBQueue mq $ MsgTrust (ts, src, tgt)
     pure NoOp
+  Me (UserId uid) -> st <# do
+    reply $ toReplyMessage $ meAnswer uid
+    pure NoOp
   Ans t -> case addAnswer cfg (getCurrent st) (getAnswers st) t of
     Left err -> st <# do
       let fieldNames = map fdName $ cfgFields cfg
@@ -192,6 +198,9 @@ handleAction cfg geoDb mq act st = case act of
       ]
     q0 = maybe "" (("\n" <>) . qdText) $ listToMaybe $ cfgQuestions cfg
     trustAnswer tgt = fromMaybe "Started trusting user-id " (cfgTrustAnswer cfg) <> tgt
+    meAnswer uid = let
+      u = T.pack $ show uid
+      in "Your userid: " <> u <> ". Someone can use `/trust " <> u <> "` to show that they trust you"
 
 botUsage :: Config -> Text
 botUsage cfg = T.concat $
