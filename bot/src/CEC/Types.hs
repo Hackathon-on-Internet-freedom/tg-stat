@@ -7,6 +7,8 @@
 
 module CEC.Types where
 
+import CEC.Keys
+
 import Data.Aeson
 import Data.Map.Strict (Map,empty)
 import Data.Text (Text)
@@ -102,12 +104,12 @@ instance ToJSON QuestionDef where
 
 data BotCfg = BotCfg
   { bcToken :: Text
-  , bcPublicKey :: Text
-  , bcSecretKey :: Text
-  , bcEncryptKey :: Text
-  , bcIncludeChainSign :: Bool
+  , bcPublicKey :: PublicKey
+  , bcSecretKey :: SecretKey
+  , bcEncryptKey :: Key
+  -- , bcIncludeChainSign :: Bool
   -- , bcRemind :: Maybe Text
-  } deriving (Eq,Show,Read,Generic)
+  } deriving (Eq,Show,Generic)
 
 instance FromJSON BotCfg where
   parseJSON = genericParseJSON $ jsonOpts 3 2
@@ -141,7 +143,7 @@ data Config = Config
   , cfgBot :: BotCfg
   , cfgTargets :: TargetCfg
   , cfgResult :: Text
-  } deriving (Eq,Show,Read,Generic)
+  } deriving (Eq,Show,Generic)
 
 instance FromJSON Config where
   parseJSON = genericParseJSON $ jsonOpts 6 3
