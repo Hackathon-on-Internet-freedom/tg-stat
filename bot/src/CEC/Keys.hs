@@ -56,6 +56,16 @@ instance ToJSON Key where
   toJSON (Key k) = toJSON $ bs2text64 k
   toEncoding (Key k) = toEncoding $ bs2text64 k
 
+instance FromJSON Nonce where
+  parseJSON = withText "Nonce" $ \t -> case text2bs t :: Either String ByteString of
+    Left e -> fail e
+    Right b -> case eitherCryptoError $ C.nonce12 b of
+      Left e -> fail $ show e
+      Right n -> pure n
+instance ToJSON Nonce where
+  toJSON n = toJSON $ bs2text64 n
+  toEncoding n = toEncoding $ bs2text64 n
+
 generateKey :: IO Key
 generateKey = Key <$> getRandomBytes 32
 
@@ -89,11 +99,20 @@ instance ToJSON Ed.SecretKey where
   toJSON sk = toJSON $ bs2text64 sk
   toEncoding sk = toEncoding $ bs2text64 sk
 
+instance FromJSON Ed.Signature where
+  parseJSON = withText "Signature" $ \t -> case text2bs t of
+    Left e -> fail e
+    Right b -> pure $ throwCryptoError $ Ed.signature (b :: ByteString)
+instance ToJSON Ed.Signature where
+  toJSON sk = toJSON $ bs2text64 sk
+  toEncoding sk = toEncoding $ bs2text64 sk
+
 
 generateKeyPair :: IO (Ed.PublicKey, Ed.SecretKey)
 generateKeyPair = do
   sk <- Ed.generateSecretKey
   pure (Ed.toPublic sk, sk)
+
 
 hash :: Text -> Text
 hash t = let

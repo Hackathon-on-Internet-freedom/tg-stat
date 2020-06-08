@@ -11,6 +11,7 @@ import Control.Concurrent.STM
 import Control.Lens
 import Control.Monad
 import Data.Aeson
+import qualified Data.ByteString.Lazy as LB
 import Data.Char
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
@@ -23,11 +24,11 @@ import Network.Google.Sheets
 import Network.Google
 import System.IO (stdout)
 
-type CC = (TVar Nonce, PublicKey, SecretKey, Key, TMVar Text)
+type CC = (TMVar Nonce, PublicKey, SecretKey, Key, TMVar Text)
 
 sheetWorker :: Config -> TBQueue MsgItem -> IO ()
 sheetWorker cfg mq = do
-  iv <- initNonce >>= newTVarIO
+  iv <- initNonce >>= newTMVarIO
   ph <- newTMVarIO ""
   forever $ do
     let sheetId = tcSheets $ cfgTargets cfg
@@ -78,13 +79,30 @@ encodeVals cc@(_,pk,sk,_,ph) srcType vals = do
         hv = hash $ LT.toStrict v
     putTMVar ph hv
     pure hv
-  pure $ concat rs ++ [toJSON h, toJSON ("signature" :: Text)]
+  let raws = concat rs ++ [toJSON h]
+      ds = sign sk pk $ LB.toStrict $ encode raws
+  pure $ raws ++ [toJSON ds]
+
+mkNonce :: TMVar Nonce -> STM Nonce
+mkNonce iv = do
+  old <- takeTMVar iv
+  let new = incrementNonce old
+  putTMVar iv new
+  pure old
+
+encJV :: TMVar Nonce -> Key -> Text -> IO [Value]
+encJV iv ek t = do
+  nonce <- atomically $  mkNonce iv
+  let ecipher = encrypt nonce ek t
+  case ecipher of
+    Left e -> pure [toJSON nonce, toJSON $ show e]
+    Right cipher -> pure [toJSON nonce, toJSON cipher]
 
 toJV :: CC -> SourceType -> FieldVal -> IO [Value]
 toJV _ _ (ValInt n) = pure $ pure $ toJSON n
 toJV _ _ (ValFloat d) = pure $ pure $ toJSON d
 toJV _ _ (ValText t) = pure $ pure $ toJSON t
-toJV (iv,pk,sk,ek,ph) _ (ValEncrypt t) = pure $ ["nonce", toJSON $ "ENC(" <> t <> ")"]
+toJV (iv,_,_,ek,_) _ (ValEncrypt t) = encJV iv ek t
 toJV _ _ (ValTime ts) = pure $ pure $ toJSON ts
 toJV _ _ (ValLoc loc) = pure $ map (toJSON . ($ loc))
   [ locCity
@@ -92,7 +110,7 @@ toJV _ _ (ValLoc loc) = pure $ map (toJSON . ($ loc))
   , fromMaybe "" . locRegion
   , locSubject
   ]
-toJV (iv,pk,sk,ek,ph) srcType (ValUser u) = pure $ case srcType of
-  SrcOpen -> pure $ toJSON u
-  SrcHashed -> pure $ toJSON $ "HASH" <> "(" <> u <> ")"
-  SrcEncrypted -> [ toJSON ("nonce" :: Text), toJSON $ "ENCRYPT(" <> u <> ")" ]
+toJV (iv,_,_,ek,_) srcType (ValUser u) = case srcType of
+  SrcOpen -> pure $ pure $ toJSON u
+  SrcHashed -> pure $ pure $ toJSON $ hash u
+  SrcEncrypted -> encJV iv ek u
