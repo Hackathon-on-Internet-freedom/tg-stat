@@ -45,7 +45,7 @@ library
   ghc-options:         -Wall
   default-language:    Haskell2010
 
-executable tgcec
+executable tgstat
   main-is:             BotMain.hs
   -- other-modules:
   -- other-extensions:
@@ -54,7 +54,7 @@ executable tgcec
   hs-source-dirs:      app
   default-language:    Haskell2010
 
-executable tgcec-keygen
+executable tgstat-keygen
   main-is:             KeyMain.hs
   -- other-modules:
   -- other-extensions:
